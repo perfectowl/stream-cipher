@@ -37,17 +37,17 @@ def key_schedule(key, rounds=DEFAULT_ROUNDS):
     return S
 
 
-def rc5_encrypt(key_stream, S, rounds=DEFAULT_ROUNDS):
-    A = int.from_bytes(key_stream[:4], byteorder='little')
-    B = int.from_bytes(key_stream[4:], byteorder='little')
+def rc5_encrypt(block, S, rounds=DEFAULT_ROUNDS):
+    A = int.from_bytes(block[:4], byteorder='little')
+    B = int.from_bytes(block[4:], byteorder='little')
     l = word_size
     A = (A + S[0]) % (2**l)
     B = (B + S[1]) % (2**l)
     for i in range(1, rounds + 1):
         A = (shift_left((A ^ B), B % l, l) + S[2 * i]) % (2**l)
         B = (shift_left((B ^ A), A % l, l) + S[2 * i + 1]) % (2**l)
-    key_stream = A.to_bytes(4, byteorder='little') + B.to_bytes(4, byteorder='little')
-    return key_stream
+    block = A.to_bytes(4, byteorder='little') + B.to_bytes(4, byteorder='little')
+    return block
 
 
 def generate_rc5_gamma(length, key):
