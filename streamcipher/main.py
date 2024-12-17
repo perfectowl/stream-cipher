@@ -52,13 +52,14 @@ def rc5_encrypt(key_stream, S, rounds=DEFAULT_ROUNDS):
 
 def generate_rc5_gamma(length, key):
     S = key_schedule(key)
-    gamma = bytearray()
+    gamma = []
     i = 0
-    while len(gamma) < length:
-        key_stream = (i.to_bytes(8, byteorder='little'))
-        gamma += rc5_encrypt(key_stream, S)
+    for _ in range(length):
+        block = (i.to_bytes(8, byteorder='little'))
+        encrypted_block = rc5_encrypt(block, S)
+        gamma.append(encrypted_block[0])
         i += 1
-    return gamma[:length]
+    return gamma
 
 
 encryption_key = os.urandom(KEY_SIZE)
