@@ -1,25 +1,71 @@
 import tkinter as tk
 from tkinter import ttk
-import random
+import os
 
 
-# Генерация ключевого потока (корень n-ной степени числа m)
-def generate_root_key_stream(length):
-    key_stream = []
-    for i in range(length):
-        m = random.randint(1, 100)
-        n = random.randint(2, 10)
-        value = int(m ** (1 / n) * 256) % 256  # Корень n-ной степени
-        key_stream.append(value)
+word_size = 32  # Размер слова
+DEFAULT_ROUNDS = 12  # Количество раундов
+KEY_SIZE = 16  # Размер ключа по дефолту
+
+# Константы для расширения ключа
+P32 = 0xB7E15163
+Q32 = 0x9E3779B9
+
+
+def shift_left(x, y, size=word_size):
+    first = (x << y) & (2 ** size - 1)
+    second = x >> (size - y)
+    return first | second
+
+
+def shift_right(x, y, size=word_size):
+    first = x >> y
+    second = (x << (size - y)) & (2 ** size - 1)
+    return first | second
+
+
+def key_schedule(key, rounds=DEFAULT_ROUNDS):
+    L = [int.from_bytes(key[i:i + 4], byteorder='little') for i in range(0, len(key), 4)]
+    S = [(P32 + i * Q32) & 0xFFFFFFFF for i in range(2 * (rounds + 1))]
+    A = B = i = j = 0
+    v = 3 * max(len(L), len(S))
+    for _ in range(v):
+        A = S[i] = shift_left((S[i] + A + B) & 0xFFFFFFFF, 3)
+        B = L[j] = shift_left((L[j] + A + B) & 0xFFFFFFFF, (A + B) & 31)
+        i = (i + 1) % len(S)
+        j = (j + 1) % len(L)
+    return S
+
+
+def rc5_encrypt(key_stream, S, rounds=DEFAULT_ROUNDS):
+    A = int.from_bytes(key_stream[:4], byteorder='little')
+    B = int.from_bytes(key_stream[4:], byteorder='little')
+    l = word_size
+    A = (A + S[0]) % (2**l)
+    B = (B + S[1]) % (2**l)
+    for i in range(1, rounds + 1):
+        A = (shift_left((A ^ B), B % l, l) + S[2 * i]) % (2**l)
+        B = (shift_left((B ^ A), A % l, l) + S[2 * i + 1]) % (2**l)
+    key_stream = A.to_bytes(4, byteorder='little') + B.to_bytes(4, byteorder='little')
     return key_stream
 
 
-# Глобальные переменные для ключевой гаммы
+def generate_rc5_gamma(length, key):
+    S = key_schedule(key)
+    gamma = bytearray()
+    i = 0
+    while len(gamma) < length:
+        key_stream = (i.to_bytes(8, byteorder='little'))
+        gamma += rc5_encrypt(key_stream, S)
+        i += 1
+    return gamma[:length]
+
+
+encryption_key = os.urandom(KEY_SIZE)
 last_key_stream = None
 last_encrypted_text = None
 
 
-# Генерация гаммы
 def generate_gamma():
     global last_key_stream
     text = message_input.get("1.0", tk.END).strip()
@@ -27,18 +73,17 @@ def generate_gamma():
         result_output.set("Введите сообщение для генерации гаммы!")
         return
     try:
-        last_key_stream = generate_root_key_stream(len(text))  # Генерация ключевого потока
-        result_output.set(f"Гамма сгенерирована! Длина гаммы: {len(last_key_stream)}")
+        length = len(text)
+        last_key_stream = generate_rc5_gamma(length, encryption_key)
+        result_output.set(f"Гамма сгенерирована! Длина гаммы: {length}")
     except Exception as e:
         result_output.set(f"Ошибка: {e}")
 
 
-# Шифрование/дешифрование с использованием XOR
 def xor_cipher(text, key_stream):
     return ''.join(chr(ord(c) ^ k) for c, k in zip(text, key_stream))
 
 
-# Шифрование сообщения
 def encrypt_message():
     global last_encrypted_text
     text = message_input.get("1.0", tk.END).strip()
@@ -51,12 +96,11 @@ def encrypt_message():
     try:
         encrypted_text = xor_cipher(text, last_key_stream)
         result_output.set(encrypted_text)
-        last_encrypted_text = encrypted_text  # Сохраняем зашифрованное сообщение
+        last_encrypted_text = encrypted_text
     except Exception as e:
         result_output.set(f"Ошибка: {e}")
 
 
-# Дешифрование сообщения
 def decrypt_message():
     text = encrypted_input.get("1.0", tk.END).strip()
     if not text:
@@ -66,31 +110,28 @@ def decrypt_message():
         decrypted_output.set("Сначала сгенерируйте гамму, соответствующую сообщению!")
         return
     try:
-        decrypted_text = xor_cipher(text, last_key_stream)  # Дешифруем с той же гаммой
+        decrypted_text = xor_cipher(text, last_key_stream)
         decrypted_output.set(decrypted_text)
     except Exception as e:
         decrypted_output.set(f"Ошибка: {e}")
 
 
-# Функция копирования текста в буфер обмена
 def copy(content):
     root.clipboard_clear()
     root.clipboard_append(content)
     root.update()
 
 
-# Функция вставки текста из буфера обмена
 def paste(entry):
     entry.delete("1.0", tk.END)
     entry.insert("1.0", root.clipboard_get())
 
 
-# Создание окна приложения
 root = tk.Tk()
 root.title("Поточный шифр с использованием XOR")
 root.geometry("600x850")  # Увеличение окна для длинных сообщений
 
-# Ввод сообщения
+
 message_frame = ttk.Frame(root)
 message_frame.pack(pady=5, fill=tk.X)
 ttk.Label(message_frame, text="Введите сообщение для шифрования:").pack(anchor=tk.W)
@@ -103,7 +144,7 @@ ttk.Button(message_frame, text="Вставить", command=lambda: paste(message
 generate_gamma_button = ttk.Button(root, text="Сгенерировать гамму", command=generate_gamma)
 generate_gamma_button.pack(pady=5)
 
-# Кнопка для шифрования
+
 encrypt_button = ttk.Button(root, text="Зашифровать!!!1", command=encrypt_message)
 encrypt_button.pack(pady=5)
 
